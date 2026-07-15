@@ -1,0 +1,6 @@
+# openai
+# python-dotenv
+pymupdf
+ollama
+sentence-transformers
+chromadb
