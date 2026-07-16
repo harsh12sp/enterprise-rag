@@ -20,9 +20,10 @@ def main():
     print("3. Load PDF Document in Chunks")
     print("4. Test Embeddings")
     print("5. Store Chunks in Vector Database")
-    print("6. Exit")
+    print("6. Search in Vector Database")
+    print("7. Exit")
 
-    choice = input("Enter your choice (1-6): ").strip()
+    choice = input("Enter your choice (1-7): ").strip()
 
     match choice:
         case "1":
@@ -141,11 +142,62 @@ def main():
 
                 
         case "6":
+            vector_search_example(vector_store, embedding_service)
+
+        case "7":
             print("Exiting program. Goodbye!")
 
         case _:
-            print("Invalid selection. Please choose between 1-6.")
+            print("Invalid selection. Please choose between 1-7.")
 
+
+def vector_search_example(vector_store: VectorStore, embedding_service: EmbeddingService):
+    print("\n--- Searching in Vector Database ---")
+
+    try:
+        if vector_store.count() == 0:
+            print("Vector database is empty. Run option 5 first.")
+            return
+
+        query = input("Enter your search query: ").strip()
+
+        if not query:
+            print("Search query cannot be empty.")
+            return
+
+        query_embedding = embedding_service.create_embedding(query)
+
+        results = vector_store.search(
+            query_embedding=query_embedding,
+            top_k=3
+        )
+
+        documents = results["documents"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
+
+        if not documents:
+            print("No matching documents found.")
+            return
+
+        print(f"\nTop {len(documents)} results:")
+
+        for index in range(len(documents)):
+            document = documents[index]
+            metadata = metadatas[index]
+            distance = distances[index]
+
+            print("\n----------------------------------------")
+            print(f"Result {index + 1}")
+            print(f"Source: {metadata.get('source', 'Unknown')}")
+            print(f"Page: {metadata.get('page_number', 'Unknown')}")
+            print(f"Chunk: {metadata.get('chunk_number', 'Unknown')}")
+            print(f"Distance: {distance:.4f}")
+            print()
+            print(document)
+
+    except Exception as error:
+        print(f"Failed to perform search: {error}")
 
 if __name__ == "__main__":
     main()

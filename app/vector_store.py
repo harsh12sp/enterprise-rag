@@ -29,6 +29,21 @@ class VectorStore:
             embeddings=embeddings,
             metadatas=metadatas
         )
+   
+    def search(
+        self,
+        query_embedding: list[float],
+        top_k: int = 3
+    ) -> dict:
+        return self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            include=[
+                "documents",
+                "metadatas",
+                "distances"
+            ]
+        )
 
     def count(self):
         return self.collection.count()    
