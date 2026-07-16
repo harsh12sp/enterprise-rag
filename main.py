@@ -25,10 +25,11 @@ def main():
     print("3. Load PDF Document in Chunks")
     print("4. Test Embeddings")
     print("5. Store Chunks in Vector Database")
-    print("6. Search in Vector Database (sample semantic search without LLM)")
-    print("7. Exit")
+    print("6. Search in Vector Database (sample semantic search without LLM/ RAG without LLM)")
+    print("7. Ask Questions About Documents (RAG with LLM and Vector Database)")
+    print("8. Exit")
 
-    choice = input("Enter your choice (1-7): ").strip()
+    choice = input("Enter your choice (1-8): ").strip()
 
     match choice:
         case "1":
@@ -111,13 +112,14 @@ def main():
         case "5":
             store_chunks_in_vector_db(vector_store, embedding_service, loader, chunker)    
         case "6":
-            vector_search_example(vector_store, embedding_service)
-
+            SemanticSearch_without_LLM(vector_store, embedding_service)
         case "7":
+            RAG_with_LLM_and_Vector_Database(llm, vector_store, embedding_service)
+        case "8":
             print("Exiting program. Goodbye!")
 
         case _:
-            print("Invalid selection. Please choose between 1-7.")
+            print("Invalid selection. Please choose between 1-8.")
 
 
 def store_chunks_in_vector_db(vector_store: VectorStore, embedding_service: EmbeddingService, loader: DocumentLoader, chunker: TextChunker):
@@ -168,7 +170,7 @@ def store_chunks_in_vector_db(vector_store: VectorStore, embedding_service: Embe
     except Exception as error:
         print(f"Failed to store chunks: {error}")
 
-def vector_search_example(vector_store: VectorStore, embedding_service: EmbeddingService):
+def SemanticSearch_without_LLM(vector_store: VectorStore, embedding_service: EmbeddingService):
     
     print("\n--- Searching in Vector Database ---")
 
@@ -187,7 +189,7 @@ def vector_search_example(vector_store: VectorStore, embedding_service: Embeddin
 
         results = vector_store.search(
             query_embedding=query_embedding,
-            top_k=3
+            top_k=8
         )
 
         documents = results["documents"][0]
@@ -216,6 +218,71 @@ def vector_search_example(vector_store: VectorStore, embedding_service: Embeddin
 
     except Exception as error:
         print(f"Failed to perform search: {error}")
+
+def RAG_with_LLM_and_Vector_Database(llm: LLMService, vector_store: VectorStore, embedding_service: EmbeddingService):
+    print("\n--- RAG with LLM and Vector Database ---")
+
+    try:
+        if vector_store.count() == 0:
+            print("Vector database is empty. Run option 5 first.")
+            return
+
+        question = input("Ask your question: ").strip()
+
+        if not question:
+            print("Question cannot be empty.")
+            return
+
+        query_embedding = embedding_service.create_embedding(question)
+
+        results = vector_store.search(
+            query_embedding=query_embedding,
+            top_k=8
+        )
+
+        documents = results["documents"][0]
+        metadatas = results["metadatas"][0]
+
+        if not documents:
+            print("No relevant chunks were found.")
+            return
+
+        context_parts = []
+
+        for document, metadata in zip(documents, metadatas):
+            context_parts.append(
+                f"""
+                Source: {metadata.get("source", "Unknown")}
+                Page: {metadata.get("page_number", "Unknown")}
+                Chunk: {metadata.get("chunk_number", "Unknown")}
+
+                Content:
+                {document}
+                """.strip()
+            )
+
+        context = "\n\n---\n\n".join(context_parts)
+
+        answer = llm.ask_with_context(
+            question=question,
+            context=context
+        )
+
+        print("\nAnswer:")
+        print("----------------------------------------")
+        print(answer)
+
+        print("\nSources:")
+        for metadata in metadatas:
+            print(
+                f"- {metadata.get('source', 'Unknown')}, "
+                f"page {metadata.get('page_number', 'Unknown')}, "
+                f"chunk {metadata.get('chunk_number', 'Unknown')}"
+            )
+
+    except Exception as error:
+        print(f"Failed to answer the question: {error}")
+
 
 if __name__ == "__main__":
     main()
