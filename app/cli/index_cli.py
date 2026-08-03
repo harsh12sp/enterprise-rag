@@ -1,4 +1,4 @@
-from app.services.langchain_indexing_service import (
+from app.services.indexing_service import (
     LangChainIndexingService,
 )
 

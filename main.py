@@ -1,7 +1,7 @@
 from app.cli.index_cli import run_indexing
 from app.cli.rag_cli import run_rag_chat
 from app.cli.search_cli import run_semantic_search
-from app.services.langchain_indexing_service import (
+from app.services.indexing_service import (
     LangChainIndexingService,
 )
 from app.services.llm_service import LLMService
@@ -9,26 +9,20 @@ from app.services.rag_service import RAGService
 from app.services.retrieval_service import RetrievalService
 
 
-DOCUMENTS_DIRECTORY = "documents"
-PERSIST_DIRECTORY = "chroma_db"
-COLLECTION_NAME = "enterprise_documents"
-EMBEDDING_MODEL = "nomic-embed-text"
-CHAT_MODEL = "llama3.2:3b"
-
-CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 200
-RETRIEVAL_TOP_K = 4
+from app.config import (
+    CHAT_MODEL,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    COLLECTION_NAME,
+    DOCUMENTS_DIRECTORY,
+    EMBEDDING_MODEL,
+    PERSIST_DIRECTORY,
+    TOP_K,
+)
 
 
 def main() -> None:
-    indexing_service = LangChainIndexingService(
-        documents_directory=DOCUMENTS_DIRECTORY,
-        persist_directory=PERSIST_DIRECTORY,
-        collection_name=COLLECTION_NAME,
-        embedding_model=EMBEDDING_MODEL,
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-    )
+    indexing_service = LangChainIndexingService()
 
     retrieval_service = RetrievalService(
         persist_directory=PERSIST_DIRECTORY,
@@ -38,13 +32,12 @@ def main() -> None:
 
     llm_service = LLMService(
         model_name=CHAT_MODEL,
-        temperature=0,
-    )
+)
 
     rag_service = RAGService(
         retrieval_service=retrieval_service,
         llm_service=llm_service,
-        top_k=RETRIEVAL_TOP_K,
+        top_k=TOP_K,
     )
 
     while True:
