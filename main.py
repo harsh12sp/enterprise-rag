@@ -1,287 +1,88 @@
-from unittest import loader
-
-from app import chunker
+from app.cli.index_cli import run_indexing
+from app.cli.rag_cli import run_rag_chat
+from app.cli.search_cli import run_semantic_search
+from app.services.langchain_indexing_service import (
+    LangChainIndexingService,
+)
 from app.services.llm_service import LLMService
-from app.services.embedding_service import EmbeddingService
-from app.document_loader import DocumentLoader
-from app.chunker import TextChunker
-from app.vector_store import VectorStore
-from pathlib import Path
+from app.services.rag_service import RAGService
+from app.services.retrieval_service import RetrievalService
 
 
-def main():
-    # Initialize services once
-    llm = LLMService()
-    loader = DocumentLoader()
-    embedding_service = EmbeddingService()
-    chunker = TextChunker(
-        chunk_size=800,
-        chunk_overlap=150
+DOCUMENTS_DIRECTORY = "documents"
+PERSIST_DIRECTORY = "chroma_db"
+COLLECTION_NAME = "enterprise_documents"
+EMBEDDING_MODEL = "nomic-embed-text"
+CHAT_MODEL = "llama3.2:3b"
+
+CHUNK_SIZE = 1200
+CHUNK_OVERLAP = 200
+RETRIEVAL_TOP_K = 4
+
+
+def main() -> None:
+    indexing_service = LangChainIndexingService(
+        documents_directory=DOCUMENTS_DIRECTORY,
+        persist_directory=PERSIST_DIRECTORY,
+        collection_name=COLLECTION_NAME,
+        embedding_model=EMBEDDING_MODEL,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
     )
-    vector_store = VectorStore()
 
-    print("1. Simple Chat")
-    print("2. Load Full PDF Document")
-    print("3. Load PDF Document in Chunks")
-    print("4. Test Embeddings")
-    print("5. Store Chunks in Vector Database")
-    print("6. Search in Vector Database (sample semantic search without LLM/ RAG without LLM)")
-    print("7. Ask Questions About Documents (RAG with LLM and Vector Database)")
-    print("8. Exit")
-
-    choice = input("Enter your choice (1-8): ").strip()
-
-    match choice:
-        case "1":
-            print("\n--- Running Simple Chat ---")
-
-            question = input("Ask something: ").strip()
-
-            if not question:
-                print("Question cannot be empty.")
-                return
-
-            answer = llm.ask(question)
-            print(f"\nAnswer: {answer}")
-
-        case "2":
-            print("\n--- Loading Full PDF Document ---")
-
-            pdf_path = "documents/contoso-backpacks-guide.pdf"
-
-            try:
-                pages = loader.load_pdf(pdf_path)
-
-                print(f"\nPages loaded: {len(pages)}")
-
-                for page in pages:
-                    print("\n----------------------------------------")
-                    print(f"Source: {page['source']}")
-                    print(f"Page: {page['page_number']}")
-                    print()
-                    print(page["text"])
-
-            except Exception as error:
-                print(f"Failed to load PDF: {error}")
-
-        case "3":
-            print("\n--- Loading PDF Document in Chunks ---")
-
-            pdf_path = "documents/contoso-backpacks-guide.pdf"
-
-            try:
-                pages = loader.load_pdf(pdf_path)
-                chunks = chunker.chunk_pages(pages)
-
-                print(f"\nPages loaded: {len(pages)}")
-                print(f"Chunks created: {len(chunks)}")
-
-                for chunk in chunks[:3]:
-                    print("\n----------------------------------------")
-                    print(f"ID: {chunk['id']}")
-                    print(f"Source: {chunk['source']}")
-                    print(f"Page: {chunk['page_number']}")
-                    print(f"Chunk: {chunk['chunk_number']}")
-                    print()
-                    print(chunk["text"])
-
-            except Exception as error:
-                print(f"Failed to process PDF: {error}")
-
-        case "4":
-            print("\n--- Testing Embeddings ---")
-
-            sentences = [
-                "I love pizza",
-                "I like pizza",
-                "The stock market crashed today"
-            ]
-
-            try:
-                embeddings = embedding_service.create_embeddings(sentences)
-
-                for sentence, vector in zip(sentences, embeddings):
-                    print("\n----------------------------------------")
-                    print(f"Sentence: {sentence}")
-                    print(f"Dimensions: {len(vector)}")
-                    print(f"First 5 values: {vector[:5]}")
-
-            except Exception as error:
-                print(f"Failed to generate embeddings: {error}")
-  
-        case "5":
-            store_chunks_in_vector_db(vector_store, embedding_service, loader, chunker)    
-        case "6":
-            SemanticSearch_without_LLM(vector_store, embedding_service)
-        case "7":
-            RAG_with_LLM_and_Vector_Database(llm, vector_store, embedding_service)
-        case "8":
-            print("Exiting program. Goodbye!")
-
-        case _:
-            print("Invalid selection. Please choose between 1-8.")
-
-
-def store_chunks_in_vector_db(vector_store: VectorStore, embedding_service: EmbeddingService, loader: DocumentLoader, chunker: TextChunker):
-    
-    print("\n--- Storing Chunks in Vector Database ---")
-
-    try:
-        all_chunks = []
-
-        for pdf_file in Path("documents").glob("*.pdf"):
-            print(f"Processing: {pdf_file.name}")
-
-            pages = loader.load_pdf(str(pdf_file))
-            chunks = chunker.chunk_pages(pages)
-
-            all_chunks.extend(chunks)
-
-        if not all_chunks:
-            print("No PDF files found in the documents folder.")
-            return
-
-        texts = [chunk["text"] for chunk in all_chunks]
-
-        embeddings = embedding_service.create_embeddings(texts)
-
-        ids = [chunk["id"] for chunk in all_chunks]
-
-        metadatas = [
-            {
-                "source": chunk["source"],
-                "page_number": chunk["page_number"],
-                "chunk_number": chunk["chunk_number"]
-            }
-            for chunk in all_chunks
-        ]
-
-        vector_store.add_documents(
-            ids=ids,
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas
-        )
-
-        print(f"PDF files processed: {len(list(Path('documents').glob('*.pdf')))}")
-        print(f"Chunks created: {len(all_chunks)}")
-        print(f"Chunks stored: {vector_store.count()}")
-
-    except Exception as error:
-        print(f"Failed to store chunks: {error}")
-
-def SemanticSearch_without_LLM(vector_store: VectorStore, embedding_service: EmbeddingService):
-    
-    print("\n--- Searching in Vector Database ---")
-
-    try:
-        if vector_store.count() == 0:
-            print("Vector database is empty. Run option 5 first.")
-            return
-
-        query = input("Enter your search query: ").strip()
-
-        if not query:
-            print("Search query cannot be empty.")
-            return
-
-        query_embedding = embedding_service.create_embedding(query)
-
-        results = vector_store.search(
-            query_embedding=query_embedding,
-            top_k=8
-        )
-
-        documents = results["documents"][0]
-        metadatas = results["metadatas"][0]
-        distances = results["distances"][0]
-
-        if not documents:
-            print("No matching documents found.")
-            return
-
-        print(f"\nTop {len(documents)} results:")
-
-        for index in range(len(documents)):
-            document = documents[index]
-            metadata = metadatas[index]
-            distance = distances[index]
-
-            print("\n----------------------------------------")
-            print(f"Result {index + 1}")
-            print(f"Source: {metadata.get('source', 'Unknown')}")
-            print(f"Page: {metadata.get('page_number', 'Unknown')}")
-            print(f"Chunk: {metadata.get('chunk_number', 'Unknown')}")
-            print(f"Distance: {distance:.4f}")
-            print()
-            print(document)
-
-    except Exception as error:
-        print(f"Failed to perform search: {error}")
-
-def RAG_with_LLM_and_Vector_Database(llm: LLMService, vector_store: VectorStore, embedding_service: EmbeddingService):
-    print("\n--- RAG with LLM and Vector Database ---")
-
-    try:
-        if vector_store.count() == 0:
-            print("Vector database is empty. Run option 5 first.")
-            return
-
-        question = input("Ask your question: ").strip()
-
-        if not question:
-            print("Question cannot be empty.")
-            return
-
-        query_embedding = embedding_service.create_embedding(question)
-
-        results = vector_store.search(
-            query_embedding=query_embedding,
-            top_k=8
-        )
-
-        documents = results["documents"][0]
-        metadatas = results["metadatas"][0]
-
-        if not documents:
-            print("No relevant chunks were found.")
-            return
-
-        context_parts = []
-
-        for document, metadata in zip(documents, metadatas):
-            context_parts.append(
-                f"""
-                Source: {metadata.get("source", "Unknown")}
-                Page: {metadata.get("page_number", "Unknown")}
-                Chunk: {metadata.get("chunk_number", "Unknown")}
-
-                Content:
-                {document}
-                """.strip()
-            )
-
-        context = "\n\n---\n\n".join(context_parts)
-
-        answer = llm.ask_with_context(
-            question=question,
-            context=context
-        )
-
-        print("\nAnswer:")
-        print("----------------------------------------")
-        print(answer)
-
-        print("\nSources:")
-        for metadata in metadatas:
-            print(
-                f"- {metadata.get('source', 'Unknown')}, "
-                f"page {metadata.get('page_number', 'Unknown')}, "
-                f"chunk {metadata.get('chunk_number', 'Unknown')}"
-            )
-
-    except Exception as error:
-        print(f"Failed to answer the question: {error}")
+    retrieval_service = RetrievalService(
+        persist_directory=PERSIST_DIRECTORY,
+        collection_name=COLLECTION_NAME,
+        embedding_model=EMBEDDING_MODEL,
+    )
+
+    llm_service = LLMService(
+        model_name=CHAT_MODEL,
+        temperature=0,
+    )
+
+    rag_service = RAGService(
+        retrieval_service=retrieval_service,
+        llm_service=llm_service,
+        top_k=RETRIEVAL_TOP_K,
+    )
+
+    while True:
+        print_menu()
+
+        choice = input(
+            "\nEnter your choice (1-4): "
+        ).strip()
+
+        match choice:
+            case "1":
+                run_indexing(indexing_service)
+
+            case "2":
+                run_semantic_search(retrieval_service)
+
+            case "3":
+                run_rag_chat(rag_service)
+
+            case "4":
+                print("\nExiting program. Goodbye!")
+                break
+
+            case _:
+                print(
+                    "\nInvalid selection. "
+                    "Choose a number between 1 and 4."
+                )
+
+
+def print_menu() -> None:
+    print("\n" + "=" * 70)
+    print("ENTERPRISE RAG")
+    print("=" * 70)
+    print("1. Index Documents")
+    print("2. Semantic Search")
+    print("3. Chat with Documents")
+    print("4. Exit")
 
 
 if __name__ == "__main__":

@@ -1,73 +1,97 @@
-from ollama import Client
-from ollama import chat
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama
+
 
 class LLMService:
+    """
+    Handles communication with the local Ollama language model.
+    """
+
     def __init__(
         self,
-        model: str = "llama3.2:3b",
-        host: str = "http://localhost:11434"
-    ):
-        self.model = model
-        self.client = Client(host=host)
+        model_name: str = "llama3.2:3b",
+        temperature: float = 0,
+    ) -> None:
+        self.llm = ChatOllama(
+            model=model_name,
+            temperature=temperature,
+        )
 
-    # LLMService class provides methods to interact with a language model for question answering and context-based responses. It initializes with a specified model and host, and includes methods to ask questions and provide context for more accurate answers.
-    def ask(self, question: str) -> str:
-        if not question or not question.strip():
-            raise ValueError("Question cannot be empty.")
-        
-        response = chat(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": question
-                        }
-                    ]
-                )
-        return response["message"]["content"]
-
-    # The ask_with_context method allows the user to ask a question with an optional context. If context is provided, it constructs a prompt that instructs the model to answer only from the given context. If the answer is not found in the context, it instructs the model to respond with a specific message indicating that the information is not available. The method then sends this prompt to the language model and returns the generated response.
-    def ask_with_context(self, question: str, context: str = "") -> str:
-        if not question or not question.strip():
-            raise ValueError("Question cannot be empty.")
-
-        if context:
-            prompt = f"""
+        self.rag_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """
 You are a document question-answering assistant.
 
-Use only the provided context.
+Answer only from the provided context.
 
-The user may make spelling mistakes. Correct obvious spelling mistakes internally when interpreting the question.
+Follow these rules:
 
-Do not infer unsupported facts.
-
-If asked to list products:
-- include only actual products
-- exclude accessories
-- exclude document titles
-- distinguish between "waterproof" and "water-resistant"
-- include a product only when the context explicitly says it is waterproof or has waterproof construction
-
-If the answer is not available in the context, say:
-"I could not find that information in the provided documents."
-
+1. Do not use outside knowledge.
+2. Do not invent missing information.
+3. Ignore retrieved content that is unrelated to the question.
+4. If the answer is not available in the context, say:
+   "I could not find that information in the provided documents."
+5. When the question asks about a category containing multiple products,
+   identify every matching product found in the context.
+6. Group category answers by product name.
+7. Do not merge the features of different products into one list.
+8. Do not stop after describing only the first matching product.
+9. When answering a price, capacity, weight, or other direct factual
+   question, respond clearly and briefly.
+10. Do not mention the retrieved chunks unless the user asks about them.
+                    """.strip(),
+                ),
+                (
+                    "human",
+                    """
 Context:
+
 {context}
 
 Question:
-{question}
-""".strip()
-        else:
-            prompt = question.strip()
 
-        response = self.client.chat(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+{question}
+
+Answer:
+                    """.strip(),
+                ),
             ]
         )
 
-        return response["message"]["content"]
+    def ask(self, question: str) -> str:
+        """
+        Sends a general question to the Ollama model.
+        """
+
+        if not question or not question.strip():
+            raise ValueError("Question cannot be empty.")
+
+        response = self.llm.invoke(question.strip())
+
+        return response.content.strip()
+
+    def ask_with_context(
+        self,
+        question: str,
+        context: str,
+    ) -> str:
+        """
+        Answers a question using only the supplied document context.
+        """
+
+        if not question or not question.strip():
+            raise ValueError("Question cannot be empty.")
+
+        if not context or not context.strip():
+            raise ValueError("Context cannot be empty.")
+
+        messages = self.rag_prompt.format_messages(
+            question=question.strip(),
+            context=context.strip(),
+        )
+
+        response = self.llm.invoke(messages)
+
+        return response.content.strip()
