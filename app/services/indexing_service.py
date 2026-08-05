@@ -137,6 +137,84 @@ class LangChainIndexingService:
 
         return documents
 
+    def load_documents_for_parent_retrieval(
+        self,
+    ) -> list[Document]:
+        """
+        Loads each PDF as one combined LangChain Document.
+
+        Page markers are inserted into the text so parent chunks can
+        span PDF page boundaries while retaining page references.
+        """
+
+        if not self.documents_directory.exists():
+            raise FileNotFoundError(
+                "Documents directory was not found: "
+                f"{self.documents_directory.resolve()}"
+            )
+
+        pdf_files = self._get_pdf_files()
+
+        if not pdf_files:
+            raise FileNotFoundError(
+                "No PDF files were found in: "
+                f"{self.documents_directory.resolve()}"
+            )
+
+        combined_documents: list[Document] = []
+
+        for pdf_file in pdf_files:
+            print(
+                f"Loading for parent retrieval: "
+                f"{pdf_file.name}"
+            )
+
+            loader = PyMuPDFLoader(
+                str(pdf_file)
+            )
+
+            page_documents = loader.load()
+
+            page_sections: list[str] = []
+
+            for page_document in page_documents:
+                zero_based_page = (
+                    page_document.metadata.get(
+                        "page",
+                        0,
+                    )
+                )
+
+                page_number = zero_based_page + 1
+
+                page_section = f"""
+    --- PAGE {page_number} ---
+
+    {page_document.page_content}
+                """.strip()
+
+                page_sections.append(page_section)
+
+            combined_content = (
+                "\n\n".join(page_sections)
+            )
+
+            combined_document = Document(
+                page_content=combined_content,
+                metadata={
+                    "source": pdf_file.name,
+                    "total_pages": len(page_documents),
+                    "document_type": "pdf",
+                },
+            )
+
+            combined_documents.append(
+                combined_document
+            )
+
+        return combined_documents
+
+
     def split_documents(
         self,
         documents: list[Document],
