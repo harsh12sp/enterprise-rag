@@ -160,12 +160,45 @@ CHILD_CHUNK_OVERLAP = int(
     )
 )
 
-PARENT_RETRIEVAL_TOP_K = int(
+# Parent retrieval depth by question type.
+PARENT_NARROW_TOP_K = int(
     os.getenv(
-        "PARENT_RETRIEVAL_TOP_K",
+        "PARENT_NARROW_TOP_K",
+        "3",
+    )
+)
+
+PARENT_DETAIL_TOP_K = int(
+    os.getenv(
+        "PARENT_DETAIL_TOP_K",
+        "5",
+    )
+)
+
+PARENT_AGGREGATION_TOP_K = int(
+    os.getenv(
+        "PARENT_AGGREGATION_TOP_K",
         "12",
     )
 )
+
+if PARENT_NARROW_TOP_K <= 0:
+    raise ValueError(
+        "PARENT_NARROW_TOP_K must be greater than zero."
+    )
+
+if PARENT_DETAIL_TOP_K <= 0:
+    raise ValueError(
+        "PARENT_DETAIL_TOP_K must be greater than zero."
+    )
+
+if PARENT_AGGREGATION_TOP_K <= 0:
+    raise ValueError(
+        "PARENT_AGGREGATION_TOP_K must be greater than zero."
+    )
+
+# Compatibility with older code.
+PARENT_RETRIEVAL_TOP_K = PARENT_AGGREGATION_TOP_K
 
 
 # ============================================================

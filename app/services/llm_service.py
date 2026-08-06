@@ -1,6 +1,6 @@
 import os
 from typing import Any
-
+from groq import RateLimitError
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
@@ -42,7 +42,10 @@ class LLMService:
         self.llm = self._create_llm(
             temperature=temperature,
         )
-
+        self.fallback_llm = ChatOllama(
+            model="llama3.2:3b",
+            temperature=temperature,
+        )
         self.rag_prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -133,7 +136,21 @@ PAGE AND CHUNK RULES
 40. If page or chunk boundaries cannot be verified, clearly state:
     "The supplied metadata does not provide enough information to
     verify the exact page or chunk boundaries."
+SOURCE CITATION RULES
 
+41. Every retrieved parent document has a Source ID such as S1 or S2.
+42. Use only Source IDs that directly support the final answer.
+43. Do not cite a source merely because it was retrieved.
+44. At the very end of every response, output exactly one line in this format:
+
+SOURCE_IDS: S1,S2
+
+45. For one supporting source, use:
+
+SOURCE_IDS: S1
+
+46. Do not put any explanation after the SOURCE_IDS line.
+47. Never invent a Source ID that is not present in the context.
 FINAL VERIFICATION
 
 Before returning the answer, silently verify:
@@ -214,7 +231,7 @@ retrieved context.
             field_name="Question",
         )
 
-        response = self.llm.invoke(
+        response = self._invoke_with_fallback(
             cleaned_question
         )
 
@@ -246,7 +263,7 @@ retrieved context.
             context=cleaned_context,
         )
 
-        response = self.llm.invoke(
+        response = self._invoke_with_fallback(
             messages
         )
 
@@ -315,3 +332,32 @@ retrieved context.
             ).strip()
 
         return str(content).strip()
+
+    def _invoke_with_fallback(
+        self,
+        messages: Any,
+    ) -> Any:
+        """
+        Uses the configured model first.
+
+        If Groq reaches its rate limit, the request automatically
+        falls back to the local Ollama model.
+        """
+
+        try:
+            return self.llm.invoke(
+                messages
+            )
+
+        except RateLimitError as error:
+            if self.provider != "groq":
+                raise
+
+            print(
+                "\nGroq rate limit reached. "
+                "Using local Ollama fallback."
+            )
+
+            return self.fallback_llm.invoke(
+                messages
+            )

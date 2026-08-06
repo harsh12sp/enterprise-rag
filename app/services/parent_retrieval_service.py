@@ -1,5 +1,6 @@
 from pathlib import Path
-
+import json
+import re
 from langchain_chroma import Chroma
 from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.storage._lc_store import create_kv_docstore
@@ -13,9 +14,11 @@ from app.config import (
     CHILD_CHUNK_SIZE,
     COLLECTION_NAME,
     EMBEDDING_MODEL,
+    PARENT_AGGREGATION_TOP_K,
     PARENT_CHUNK_OVERLAP,
     PARENT_CHUNK_SIZE,
-    PARENT_RETRIEVAL_TOP_K,
+    PARENT_DETAIL_TOP_K,
+    PARENT_NARROW_TOP_K,
     PARENT_STORE_DIRECTORY,
     PERSIST_DIRECTORY,
 )
@@ -91,7 +94,7 @@ class ParentRetrievalService:
                 "document_type",
             ],
             search_kwargs={
-                "k": PARENT_RETRIEVAL_TOP_K,
+                "k": PARENT_NARROW_TOP_K,
             },
         )
 
@@ -124,7 +127,9 @@ class ParentRetrievalService:
         query: str,
     ) -> list[Document]:
         """
-        Searches child chunks and returns unique corresponding parents.
+        Selects retrieval depth based on the question type,
+        retrieves parent documents, adds page metadata,
+        and removes duplicates.
         """
 
         if not query or not query.strip():
@@ -132,14 +137,147 @@ class ParentRetrievalService:
                 "Search query cannot be empty."
             )
 
+        cleaned_query = query.strip()
+
+        retrieval_mode, top_k = (
+            self._get_retrieval_strategy(
+                cleaned_query
+            )
+        )
+
+        # The application is currently a single-user CLI, so updating
+        # search_kwargs before invoke is safe for this implementation.
+        self.retriever.search_kwargs["k"] = top_k
+
         retrieved_documents = self.retriever.invoke(
-            query.strip(),
+            cleaned_query
         )
 
-        return self._remove_duplicate_documents(
-            retrieved_documents,
+        unique_documents: list[Document] = []
+        seen_documents: set[
+            tuple[str, int, str]
+        ] = set()
+
+        for document in retrieved_documents:
+            self._add_page_range_metadata(
+                document
+            )
+
+            source = str(
+                document.metadata.get(
+                    "source",
+                    "Unknown",
+                )
+            )
+
+            start_index = int(
+                document.metadata.get(
+                    "start_index",
+                    0,
+                )
+            )
+
+            document_key = (
+                source,
+                start_index,
+                document.page_content,
+            )
+
+            if document_key in seen_documents:
+                continue
+
+            seen_documents.add(
+                document_key
+            )
+
+            # Useful for debugging and evaluation.
+            document.metadata[
+                "retrieval_mode"
+            ] = retrieval_mode
+
+            document.metadata[
+                "retrieval_top_k"
+            ] = top_k
+
+            unique_documents.append(
+                document
+            )
+
+        return unique_documents
+
+    @staticmethod
+    def _get_retrieval_strategy(
+        query: str,
+    ) -> tuple[str, int]:
+        """
+        Returns a retrieval mode and top-k value based on
+        the apparent scope of the question.
+        """
+
+        normalized_query = " ".join(
+            query.lower().split()
         )
 
+        aggregation_phrases = (
+            "list all",
+            "show all",
+            "find all",
+            "compare all",
+            "every product",
+            "every tent",
+            "all tents",
+            "all products",
+            "all accessories",
+            "which tents",
+            "which products",
+            "which backpacks",
+            "cheapest",
+            "most expensive",
+            "under $",
+            "over $",
+            "below $",
+            "above $",
+            "less than",
+            "greater than",
+            "how many",
+        )
+
+        detail_phrases = (
+            "features",
+            "specifications",
+            "specs",
+            "materials",
+            "waterproof rating",
+            "dimensions",
+            "weight",
+            "room configuration",
+            "weather protection",
+            "compare the features",
+        )
+
+        if any(
+            phrase in normalized_query
+            for phrase in aggregation_phrases
+        ):
+            return (
+                "aggregation",
+                PARENT_AGGREGATION_TOP_K,
+            )
+
+        if any(
+            phrase in normalized_query
+            for phrase in detail_phrases
+        ):
+            return (
+                "detail",
+                PARENT_DETAIL_TOP_K,
+            )
+
+        return (
+            "narrow",
+            PARENT_NARROW_TOP_K,
+        )
+    
     @staticmethod
     def _remove_duplicate_documents(
         documents: list[Document],
@@ -178,4 +316,116 @@ class ParentRetrievalService:
 
         return sum(
             1 for _ in self.parent_store.yield_keys()
+        )
+
+    @staticmethod
+    def _add_page_range_metadata(
+        document: Document,
+    ) -> None:
+        """
+        Calculates the pages overlapped by a parent chunk using
+        the chunk start index and stored PDF-page boundaries.
+        """
+
+        metadata = document.metadata
+
+        raw_boundaries = metadata.get(
+            "page_boundaries"
+        )
+
+        page_boundaries: list[dict[str, int]] = []
+
+        if isinstance(raw_boundaries, str):
+            try:
+                page_boundaries = json.loads(
+                    raw_boundaries
+                )
+            except json.JSONDecodeError:
+                page_boundaries = []
+
+        elif isinstance(raw_boundaries, list):
+            page_boundaries = raw_boundaries
+
+        chunk_start = int(
+            metadata.get(
+                "start_index",
+                0,
+            )
+        )
+
+        chunk_end = (
+            chunk_start
+            + len(document.page_content)
+        )
+
+        page_numbers: list[int] = []
+
+        for boundary in page_boundaries:
+            page_start = int(
+                boundary.get(
+                    "start",
+                    0,
+                )
+            )
+
+            page_end = int(
+                boundary.get(
+                    "end",
+                    0,
+                )
+            )
+
+            page_number = int(
+                boundary.get(
+                    "page_number",
+                    0,
+                )
+            )
+
+            # The chunk and page overlap when each starts before
+            # the other one ends.
+            overlaps_page = (
+                chunk_start < page_end
+                and chunk_end > page_start
+            )
+
+            if overlaps_page and page_number > 0:
+                page_numbers.append(
+                    page_number
+                )
+
+        # Fallback for older indexed documents that contain page
+        # markers but do not contain page_boundaries metadata.
+        if not page_numbers:
+            marker_matches = re.findall(
+                r"--- PAGE (\d+) ---",
+                document.page_content,
+            )
+
+            page_numbers = [
+                int(page)
+                for page in marker_matches
+            ]
+
+        page_numbers = sorted(
+            set(page_numbers)
+        )
+
+        if not page_numbers:
+            metadata["start_page"] = None
+            metadata["end_page"] = None
+            metadata["page_numbers"] = ""
+            return
+
+        metadata["start_page"] = min(
+            page_numbers
+        )
+
+        metadata["end_page"] = max(
+            page_numbers
+        )
+
+        metadata["page_numbers"] = ",".join(
+            str(page)
+            for page in page_numbers
         )
