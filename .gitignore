@@ -1,3 +1,9 @@
-venv/
+.env
+chroma_db/
+parent_store/
 __pycache__/
-chroma_db
+*.pyc
+venv/
+venv/
+.venv/
+env/

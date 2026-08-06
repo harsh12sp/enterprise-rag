@@ -1,7 +1,10 @@
+from pathlib import Path
+
 from langchain_chroma import Chroma
 from langchain_classic.retrievers import ParentDocumentRetriever
+from langchain_classic.storage._lc_store import create_kv_docstore
+from langchain_classic.storage.file_system import LocalFileStore
 from langchain_core.documents import Document
-from langchain_core.stores import InMemoryStore
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -13,14 +16,15 @@ from app.config import (
     PARENT_CHUNK_OVERLAP,
     PARENT_CHUNK_SIZE,
     PARENT_RETRIEVAL_TOP_K,
+    PARENT_STORE_DIRECTORY,
     PERSIST_DIRECTORY,
 )
 
 
 class ParentRetrievalService:
     """
-    Uses small child chunks for precise vector search and returns
-    larger parent documents for richer LLM context.
+    Uses smaller child chunks for precise semantic search and returns
+    larger parent chunks for richer cross-page context.
     """
 
     def __init__(self) -> None:
@@ -34,10 +38,21 @@ class ParentRetrievalService:
             persist_directory=PERSIST_DIRECTORY,
         )
 
-        # Stores the larger parent documents.
-        # This store is currently in memory and is cleared
-        # when the application stops.
-        self.parent_store = InMemoryStore()
+        # Persist parent documents to disk instead of storing them
+        # only in application memory.
+        parent_store_path = Path(PARENT_STORE_DIRECTORY)
+        parent_store_path.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        byte_store = LocalFileStore(
+            parent_store_path,
+        )
+
+        self.parent_store = create_kv_docstore(
+            byte_store,
+        )
 
         self.parent_splitter = RecursiveCharacterTextSplitter(
             chunk_size=PARENT_CHUNK_SIZE,
@@ -85,8 +100,8 @@ class ParentRetrievalService:
         documents: list[Document],
     ) -> dict[str, int]:
         """
-        Creates parent documents, splits them into child chunks,
-        embeds the child chunks, and stores the parents separately.
+        Creates parent documents, splits them into searchable child
+        chunks, embeds the children, and persists both stores.
         """
 
         if not documents:
@@ -95,12 +110,13 @@ class ParentRetrievalService:
             )
 
         self.retriever.add_documents(
-            documents
+            documents,
         )
 
         return {
             "documents": len(documents),
             "child_chunks": self.count_child_chunks(),
+            "parent_documents": self.count_parent_documents(),
         }
 
     def search(
@@ -108,8 +124,7 @@ class ParentRetrievalService:
         query: str,
     ) -> list[Document]:
         """
-        Searches the child chunks and returns the corresponding
-        larger parent documents.
+        Searches child chunks and returns unique corresponding parents.
         """
 
         if not query or not query.strip():
@@ -117,9 +132,37 @@ class ParentRetrievalService:
                 "Search query cannot be empty."
             )
 
-        return self.retriever.invoke(
-            query.strip()
+        retrieved_documents = self.retriever.invoke(
+            query.strip(),
         )
+
+        return self._remove_duplicate_documents(
+            retrieved_documents,
+        )
+
+    @staticmethod
+    def _remove_duplicate_documents(
+        documents: list[Document],
+    ) -> list[Document]:
+        """
+        Removes duplicate parent content while preserving retrieval order.
+        """
+
+        unique_documents: list[Document] = []
+        seen_content: set[str] = set()
+
+        for document in documents:
+            normalized_content = (
+                document.page_content.strip()
+            )
+
+            if normalized_content in seen_content:
+                continue
+
+            seen_content.add(normalized_content)
+            unique_documents.append(document)
+
+        return unique_documents
 
     def count_child_chunks(self) -> int:
         """
@@ -127,3 +170,12 @@ class ParentRetrievalService:
         """
 
         return self.vector_store._collection.count()
+
+    def count_parent_documents(self) -> int:
+        """
+        Returns the number of parent documents stored on disk.
+        """
+
+        return sum(
+            1 for _ in self.parent_store.yield_keys()
+        )
