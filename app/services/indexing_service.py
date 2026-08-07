@@ -67,6 +67,11 @@ class LangChainIndexingService:
             collection_name=self.collection_name,
             embedding_function=self.embeddings,
             persist_directory=self.persist_directory,
+            collection_configuration={
+                "hnsw": {
+                    "space": "cosine"
+                }
+            },
         )
 
     @staticmethod

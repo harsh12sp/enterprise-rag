@@ -39,6 +39,11 @@ class ParentRetrievalService:
             collection_name=f"{COLLECTION_NAME}_children",
             embedding_function=self.embeddings,
             persist_directory=PERSIST_DIRECTORY,
+            collection_configuration={
+                            "hnsw": {
+                                "space": "cosine"
+                            }
+                        },
         )
 
         # Persist parent documents to disk instead of storing them

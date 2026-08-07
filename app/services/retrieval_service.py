@@ -23,6 +23,11 @@ class RetrievalService:
             collection_name=collection_name,
             embedding_function=self.embeddings,
             persist_directory=persist_directory,
+            collection_configuration={
+                            "hnsw": {
+                                "space": "cosine"
+                            }
+                        },
         )
 
     def search(
