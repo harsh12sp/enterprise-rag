@@ -363,6 +363,7 @@ These instructions reduce hallucinations, but they do not guarantee perfect outp
 | Text splitting      | RecursiveCharacterTextSplitter |
 | Embeddings          | Ollama with `nomic-embed-text` |
 | Vector database     | ChromaDB                       |
+| Similarity metric   | Cosine distance                |
 | Parent storage      | LocalFileStore                 |
 | Hosted answer model | Groq                           |
 | Local answer model  | Ollama                         |
